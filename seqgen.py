@@ -1,5 +1,3 @@
-#!/usr/bin/python3
-
 import sys
 import gzip
 import random

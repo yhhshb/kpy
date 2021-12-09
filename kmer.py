@@ -116,9 +116,14 @@ def minimizer(m: int, seq: str, hasher) -> str:
             mini = i
     return seq[mini:(mini+m)], seq[:mini]+'|'+seq[mini+m:]
 
+def check(seq: str, nt_table: list, bound: int):
+    for c in seq:
+        if nt_table[ord(c)] >= bound: return False
+    return True
+
 class Spectrum:
     
-    def __init__(self):
+    def __init__(self) -> "Spectrum":
         self.histogram = dict()
         
     def add(self, count: int):
@@ -144,18 +149,18 @@ class Spectrum:
             else: self.histogram[count] = 1
         if close: file_handle.close()
 
-    def empty(self):
+    def empty(self) -> bool:
         return not bool(self.histogram)
 
-    def L0Norm(self):
+    def L0Norm(self) -> int:
         return sum(list(self.histogram.values()))
 
-    def L1Norm(self):
+    def L1Norm(self) -> int:
         L1 = 0
         for k, v in self.histogram.items(): L1 += smart_numeric_cast(k) * smart_numeric_cast(v)
         return L1
 
-    def entropy(self):
+    def entropy(self) -> float:
         #L1 = self.L1Norm()
         L0 = self.L0Norm()
         H0 = 0
@@ -164,10 +169,10 @@ class Spectrum:
             H0 += -p*math.log(p,2)
         return H0
 
-    def getMaxColumn(self):
+    def getMaxColumn(self) -> int:
         return max(list(self.histogram.values()))
 
-    def getMaxCount(self):
+    def getMaxCount(self) -> int:
         mcounts = list()
         colmax = self.getMaxColumn()
         for count, column in self.histogram.items():
@@ -175,7 +180,7 @@ class Spectrum:
         mcounts.sort()
         return mcounts[0]
 
-    def getOptimalEpsilon(self):
+    def getOptimalEpsilon(self) -> float:
         """Dimension a Bloom Filter for the cold items of the spectrum.
 
         :return: The best epsilon for a Bloom Filter storing cold items only in order to minimize the false positives coming from the most common item.
@@ -189,7 +194,7 @@ class Spectrum:
         #L1 = self.L1Norm()
         #return N / (L1 - N)
 
-    def getOptimizedEpsilon(self, c_csf: float):
+    def getOptimizedEpsilon(self, c_csf: float) -> float:
         L0 = self.L0Norm()
         N = self.getMaxColumn()
         c_bf = 1/math.log(2)
@@ -218,6 +223,7 @@ def set_main(args):
     fo.close()
 
 def count_main(args):
+    assert len(args.sep) == 1
     table = dict()
     for f in args.i:
         if f.endswith(".gz"): fi = gzip.open(f, "rt")
@@ -230,7 +236,7 @@ def count_main(args):
             count(seq, args.k, args.c, table)
     if (args.o): fo = open(args.o, "w")
     else: fo = sys.stdout
-    for k, v in table.items(): fo.write("{} {}\n".format(k, v))
+    for k, v in table.items(): fo.write("{}{}{}\n".format(k, args.sep, v))
     fo.close()
 
 def diff_main(args):
@@ -246,10 +252,49 @@ def diff_main(args):
     for s, km, delta in difference:
         sys.stdout.write("{},{},{}\n".format(s, km, delta))
 
+def tab_diff_main(args):
+    assert len(args.sep) == 1
+    si = builtins.set()
+    with open(args.i, "r") as ih:
+        for line in ih:
+            km = line.strip().split(args.sep)[0]
+            if args.g:
+                if check(km, fastx.enc_nuc_table, 4): si.add(km)
+            else:
+                si.add(km)
+    sj = builtins.set()
+    with open(args.j, "r") as jh:
+        for line in jh:
+            km = line.strip().split(args.sep)[0]
+            if args.g:
+                if check(km, fastx.enc_nuc_table, 4): sj.add(km)
+            else:
+                sj.add(km)
+    difference = diff(si, sj, args.s)
+    for s, km, delta in difference:
+        sys.stdout.write("{},{},{}\n".format(s, km, delta))
+
+def histogram_main(args):
+    assert len(args.sep) == 1
+    sp = Spectrum()
+    if args.i: ih = open(args.i, "r")
+    else: ih = sys.stdin
+    for line in ih:
+        sp.add(int(line.strip().split(args.sep)[1]))
+    ih.close()
+    if args.o: oh = open(args.o, "w")
+    else: oh = sys.stdout
+    for v, c in sorted([(v,c) for v,c in sp.histogram.items()]):
+        oh.write("{},{}\n".format(v,c))
+    oh.close()
+    sys.stderr.write("entropy = {}\n".format(sp.entropy()))
+
 def main(args):
     if (args.command == "set"): set_main(args)
     elif (args.command == "count"): count_main(args)
     elif (args.command == "diff"): diff_main(args)
+    elif (args.command == "tabdiff"): tab_diff_main(args)
+    elif (args.command == "histogram"): histogram_main(args)
     else: parser.print_help(sys.stderr)
     
 def setup_parser():
@@ -270,6 +315,7 @@ def setup_parser():
     parser_count.add_argument("-o", help="output count table [stdout]", type=str)
     parser_count.add_argument("-k", help="k-mer length", type=int, required=True)
     parser_count.add_argument("-c", help="canonical k-mers", action="store_true")
+    parser_count.add_argument("--sep", help="separator between kmers and their counts", type=str, default=',')
 
     parser_diff = subparsers.add_parser("diff", help="Compute k-mer difference between two fastx files")
     parser_diff.add_argument("-i", help="first fasta file", type=str, required=True)
@@ -277,6 +323,19 @@ def setup_parser():
     parser_diff.add_argument("-k", help="k-mer length", type=int, required=True)
     parser_diff.add_argument("-c", help="canonical k-mers", action="store_true")
     parser_diff.add_argument("-s", help="symmetric difference", action="store_true")
+
+    parser_tabdiff = subparsers.add_parser("tabdiff", help="Compute k-mer difference between two k-mer tables")
+    parser_tabdiff.add_argument("-i", help="first table", type=str, required=True)
+    parser_tabdiff.add_argument("-j", help="second table", type=str, required=True)
+    parser_tabdiff.add_argument("-s", help="symmetric difference", action="store_true")
+    parser_tabdiff.add_argument("-g", help="ignore strings with letters other than [ACGT]", action="store_true")
+    parser_tabdiff.add_argument("--sep", help="separator between kmers and their counts", type=str, default=',')
+
+    parser_histogram = subparsers.add_parser("histogram", help="Compute histogram from k-mer count table and relative statistics")
+    parser_histogram.add_argument("-i", help="k-mer count table [stdin]", type=str)
+    parser_histogram.add_argument("-o", help="output file [stdout]", type=str)
+    parser_histogram.add_argument("--sep", help="separator between kmers and their counts [,]", type=str, default=',')
+
 
     return parser
 

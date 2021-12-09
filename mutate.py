@@ -1,5 +1,3 @@
-#!/usr/bin/python3
-
 """
 This script takes a FASTA file in input (-i option or stdin) and prints the randomly modified records.
 """
